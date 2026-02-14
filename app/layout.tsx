@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Questrial, Rubik } from "next/font/google";
 import "./globals.css";
+import { ReduxProvider } from "@/store/Provider";
 
 const questrial = Questrial({
   subsets: ["latin"],
@@ -34,14 +35,16 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className={`antialiased`}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          {children}
-        </ThemeProvider>
+        <ReduxProvider>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            {children}
+          </ThemeProvider>
+        </ReduxProvider>
       </body>
     </html>
   );
