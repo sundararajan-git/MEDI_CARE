@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { ThemeProvider } from "@/components/theme-provider";
-import { Questrial, Rubik } from "next/font/google";
+import { ThemeProvider } from "@/components/shadcn/theme-provider";
+import { Questrial, Michroma } from "next/font/google";
 import "./globals.css";
 import { ReduxProvider } from "@/store/Provider";
+import ToasterProvider from "@/components/app/provider/ToasterProvider";
 
 const questrial = Questrial({
   subsets: ["latin"],
@@ -11,9 +12,9 @@ const questrial = Questrial({
   variable: "--font-sans",
 });
 
-const rubik = Rubik({
+const michroma = Michroma({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  weight: ["400"],
   display: "swap",
   variable: "--font-heading",
 });
@@ -31,7 +32,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${questrial.variable} ${rubik.variable}`}
+      className={`${questrial.variable} ${michroma.variable}`}
       suppressHydrationWarning
     >
       <body className={`antialiased`}>
@@ -42,6 +43,7 @@ export default function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
+            <ToasterProvider />
             {children}
           </ThemeProvider>
         </ReduxProvider>

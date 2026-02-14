@@ -1,6 +1,6 @@
 "use client";
 
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { ThemeToggle } from "@/components/shadcn/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { decrement, increment } from "@/store/features/counterSlice";
 import { AppDispatch, RootState } from "@/store/store";
