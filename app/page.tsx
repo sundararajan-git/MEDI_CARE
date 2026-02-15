@@ -1,52 +1,51 @@
 "use client";
 
-import { ThemeToggle } from "@/components/shadcn/ThemeToggle";
-import { Button } from "@/components/ui/button";
-import { decrement, increment } from "@/store/features/counterSlice";
-import { AppDispatch, RootState } from "@/store/store";
-import { createClient } from "@/lib/supabase/server";
-import { useEffect, useState } from "react";
-import { useDispatch, useSelector } from "react-redux";
-import { supabase } from "@/lib/supabase/client";
+import LogoutButton from "@/components/app/auth/LogoutButton";
+import { useAuth } from "@/lib/hooks/useAuth";
 
-const page = () => {
-  const counter = useSelector((state: RootState) => state.counter);
-  const dispatch = useDispatch<AppDispatch>();
-  const [users, setUsers] = useState([]);
+const HomePage = () => {
+  const { user, loading } = useAuth();
 
-  const fetchData = async () => {
-    try {
-      const { data, error } = await supabase.from("users").select();
-      console.log(data);
-    } catch (error) {
-      console.error(error);
-    }
-  };
+  console.log(user);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="animate-pulse">Loading...</p>
+      </div>
+    );
+  }
+
   return (
-    <div>
-      <h1 className="font-heading">Welcome to our World</h1>
-      <h1 className="font-sans">Welcome to our World</h1>
-      <ThemeToggle />
-      <p>{counter.value}</p>
-      <Button
-        onClick={() => {
-          dispatch(increment());
-        }}
-      >
-        Increment
-      </Button>
-      <Button
-        onClick={() => {
-          dispatch(decrement());
-        }}
-      >
-        Decrement
-      </Button>
+    <div className="min-h-screen flex flex-col items-center justify-center p-8">
+      <div className="max-w-md w-full space-y-8 text-center">
+        <div className="space-y-4">
+          <h1 className="text-4xl font-bold font-heading">
+            Welcome to MediCare
+          </h1>
+          <p className="text-muted-foreground">
+            You are successfully authenticated!
+          </p>
+        </div>
+
+        <div className="bg-card border rounded-lg p-6 space-y-4">
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              Logged in as (Redux):
+            </p>
+            <p className="font-medium">{user?.email}</p>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">User ID:</p>
+            <p className="font-mono text-xs break-all">{user?.id}</p>
+          </div>
+        </div>
+
+        <LogoutButton />
+      </div>
     </div>
   );
 };
-export default page;
+
+export default HomePage;

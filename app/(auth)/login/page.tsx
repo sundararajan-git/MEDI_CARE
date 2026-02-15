@@ -17,9 +17,15 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Info } from "lucide-react";
+import toast from "react-hot-toast";
+import { login } from "@/app/actions/auth";
+
+import { useDispatch } from "react-redux";
+import { setUser } from "@/store/features/userSlice";
 
 const Login = () => {
   const router = useRouter();
+  const dispatch = useDispatch();
   const [btnLoading, setBtnLoading] = useState(false);
   const {
     register,
@@ -29,10 +35,21 @@ const Login = () => {
     resolver: zodResolver(loginSchema),
   });
 
-  const onSubmit = async (data: LoginFormData) => {
+  const onSubmit = async (formData: LoginFormData) => {
     try {
       setBtnLoading(true);
-      console.log(data);
+      const result = await login(formData);
+
+      if (result?.error) {
+        throw new Error(result.error);
+      }
+
+      if (result.user && result.session) {
+        dispatch(setUser({ user: result.user, session: result.session }));
+      }
+
+      toast.success(result?.message || "Logged in!");
+      router.replace("/");
     } catch (err) {
       showErrorToast(err as ErrorToastType);
     } finally {
@@ -76,7 +93,7 @@ const Login = () => {
                 type="email"
                 placeholder="email"
                 {...register("email")}
-                className={`transition-all duration-200 ${
+                className={`transition-all duration-200 py-5 ${
                   errors.email ? inputErrorStyle : ""
                 }`}
               />
@@ -104,7 +121,7 @@ const Login = () => {
                 type="password"
                 placeholder="password"
                 {...register("password")}
-                className={`transition-all duration-200 ${
+                className={`transition-all duration-200 py-5 ${
                   errors.password ? inputErrorStyle : ""
                 }`}
               />

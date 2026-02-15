@@ -4,14 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ErrorToastType } from "@/types";
-import { showErrorToast, validateForm } from "@/utils/helperFunctions";
-import axios from "axios";
+import { showErrorToast } from "@/utils/helperFunctions";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import toast from "react-hot-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { SignupFormData, signupSchema } from "@/lib/zod/authSchema";
+import { signup } from "@/app/actions/auth";
 import {
   Tooltip,
   TooltipContent,
@@ -20,8 +20,12 @@ import {
 } from "@/components/ui/tooltip";
 import { Info } from "lucide-react";
 
+import { useDispatch } from "react-redux";
+import { setUser } from "@/store/features/userSlice";
+
 const Signup = () => {
   const router = useRouter();
+  const dispatch = useDispatch();
   const [btnLoading, setBtnLoading] = useState(false);
   const {
     register,
@@ -31,11 +35,20 @@ const Signup = () => {
     resolver: zodResolver(signupSchema),
   });
 
-  const onSubmit = async (data: SignupFormData) => {
+  const onSubmit = async (formData: SignupFormData) => {
     try {
       setBtnLoading(true);
+      const result = await signup(formData);
+      if (result?.error) {
+        throw new Error(result.error);
+      }
 
-      console.log(data);
+      if (result.user && result.session) {
+        dispatch(setUser({ user: result.user, session: result.session }));
+      }
+
+      toast.success(result?.message || "Signed up successfully");
+      router.replace("/");
     } catch (err) {
       showErrorToast(err as ErrorToastType);
     } finally {
@@ -79,7 +92,7 @@ const Signup = () => {
                 type="email"
                 placeholder="email"
                 {...register("email")}
-                className={`transition-all duration-200 ${
+                className={`transition-all duration-200 py-5 ${
                   errors.email ? inputErrorStyle : ""
                 }`}
               />
@@ -107,7 +120,7 @@ const Signup = () => {
                 type="password"
                 placeholder="password"
                 {...register("password")}
-                className={`transition-all duration-200 ${
+                className={`transition-all duration-200 py-5 ${
                   errors.password ? inputErrorStyle : ""
                 }`}
               />
@@ -135,7 +148,7 @@ const Signup = () => {
                 type="password"
                 placeholder="confirm password"
                 {...register("confirmPassword")}
-                className={`transition-all duration-200 ${
+                className={`transition-all duration-200 py-5 ${
                   errors.confirmPassword ? inputErrorStyle : ""
                 }`}
               />

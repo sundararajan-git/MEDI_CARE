@@ -1,3 +1,5 @@
+"use client";
+
 import { Button } from "@/components/ui/button";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
@@ -6,10 +8,10 @@ import { TbMedicalCrossFilled } from "react-icons/tb";
 
 const AuthLayout = () => {
   const { theme, setTheme } = useTheme();
-  const [clientOnly, setClientOnly] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setClientOnly(true);
+    setMounted(true);
   }, []);
 
   return (
@@ -20,21 +22,22 @@ const AuthLayout = () => {
         </div>
         <span className="font-semibold font-heading text-xl">Medi Care</span>
       </a>
-      <Button
-        variant="ghost"
-        className="cursor-pointer rounded-full hover:bg-transparent dark:hover:bg-transparent"
-        onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-      >
-        {clientOnly && (
-          <>
-            {theme === "dark" ? (
-              <LuSunMedium className="size-5" />
-            ) : (
-              <LuMoonStar className="size-4" />
-            )}
-          </>
-        )}
-      </Button>
+      {mounted ? (
+        <Button
+          variant="ghost"
+          className="cursor-pointer rounded-full hover:bg-transparent dark:hover:bg-transparent"
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          suppressHydrationWarning
+        >
+          {theme === "dark" ? (
+            <LuSunMedium className="size-5" />
+          ) : (
+            <LuMoonStar className="size-4" />
+          )}
+        </Button>
+      ) : (
+        <></>
+      )}
     </div>
   );
 };
