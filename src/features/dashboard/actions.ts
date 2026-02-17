@@ -90,54 +90,101 @@ export async function getPatientStats(todayStr?: string) {
         const isCreated = created <= endOfDate;
         const hasLog = anyLogByDate[dateStr]?.has(m.id);
 
-        const isNotDeleted = !deleted || deleted > startOfDate;
+        let wasActive = !deleted || deleted > startOfDate;
 
-        return (isCreated || hasLog) && isNotDeleted;
+        // If deleted on this specific day, only count it if it was scheduled before the deletion time
+        if (deleted && isSameDay(deleted, date)) {
+          const [h, m_time] = (m.reminder_time || "08:00")
+            .split(":")
+            .map(Number);
+          const reminderTimeOnDeletionDay = new Date(dateStr);
+          reminderTimeOnDeletionDay.setHours(h, m_time, 0, 0);
+
+          const wasScheduledBeforeDeletion =
+            reminderTimeOnDeletionDay <= deleted;
+          wasActive = hasLog || wasScheduledBeforeDeletion;
+        }
+
+        return (isCreated || hasLog) && wasActive;
       });
     };
 
+    // Use alert window from user metadata or default to 120 minutes
+    const userMetadata = (user.user_metadata as any) || {};
+    const alertWindowMinutes = userMetadata.alert_window || 120;
+    const gracePeriodMs = alertWindowMinutes * 60 * 1000;
+
     // Calculate medication adherence streak (consecutive complete days)
     let streak = 0;
+    const now = new Date();
     const todayKey = format(today, "yyyy-MM-dd");
 
     const activeTodayMeds = getActiveMedsForDate(today);
     const takenTodaySet = logsByDate[todayKey] || new Set();
 
-    // Check if today is complete or has missed medications
+    // Determine today's state
+    const isTodayComplete =
+      activeTodayMeds.length > 0 &&
+      activeTodayMeds.every((m) => takenTodaySet.has(m.id));
+
     let hasTodayMissed = false;
-    for (const med of activeTodayMeds) {
-      if (!takenTodaySet.has(med.id)) {
-        const [h, m] = med.reminder_time.split(":").map(Number);
-        const remDate = new Date();
-        remDate.setHours(h, m, 0, 0);
-        if (new Date() > new Date(remDate.getTime() + 6 * 60 * 60 * 1000)) {
-          hasTodayMissed = true;
-          break;
+    if (!isTodayComplete && activeTodayMeds.length > 0) {
+      for (const med of activeTodayMeds) {
+        if (!takenTodaySet.has(med.id)) {
+          const [h, m] = med.reminder_time.split(":").map(Number);
+          const remDate = new Date(today);
+          remDate.setHours(h, m, 0, 0);
+
+          // Use the dynamic grace period
+          const graceEnd = new Date(remDate.getTime() + gracePeriodMs);
+          if (now.getTime() >= graceEnd.getTime()) {
+            hasTodayMissed = true;
+            break;
+          }
         }
       }
     }
 
-    if (!hasTodayMissed) {
+    if (isTodayComplete) {
       streak = 1;
+    } else if (hasTodayMissed) {
+      streak = 0;
+    } else {
+      // Not complete yet but not missed. Today doesn't contribute to streak count yet,
+      // but the streak can continue from yesterday.
+      streak = 0;
     }
 
     // Count consecutive complete days going backwards from yesterday
-    let checkDate = subDays(today, 1);
-    while (streak < 365) {
-      const activeMeds = getActiveMedsForDate(checkDate);
-      if (activeMeds.length === 0) {
-        break;
-      }
+    // If today is missed, we don't look back (or we could, but a missed dose usually breaks the active streak)
+    if (!hasTodayMissed) {
+      let checkDate = subDays(today, 1);
+      let daysChecked = 0;
+      // Look back up to 365 days
+      while (daysChecked < 365) {
+        const activeMeds = getActiveMedsForDate(checkDate);
 
-      const dKey = format(checkDate, "yyyy-MM-dd");
-      const takenSet = logsByDate[dKey] || new Set();
-      const isComplete = activeMeds.every((m) => takenSet.has(m.id));
+        // If no meds scheduled for this day, skip it and continue the streak
+        if (activeMeds.length === 0) {
+          checkDate = subDays(checkDate, 1);
+          daysChecked++;
+          // Safety break if we go back 30 days and find no medications
+          if (daysChecked > 30 && streak === 0) break;
+          continue;
+        }
 
-      if (isComplete) {
-        streak++;
-        checkDate = subDays(checkDate, 1);
-      } else {
-        break;
+        const dKey = format(checkDate, "yyyy-MM-dd");
+        const takenSet = logsByDate[dKey] || new Set();
+        const isComplete = activeMeds.every((m) => takenSet.has(m.id));
+
+        if (isComplete) {
+          streak++;
+          checkDate = subDays(checkDate, 1);
+          daysChecked++;
+        } else {
+          // Streak broken in history
+          break;
+        }
       }
     }
 
@@ -214,9 +261,9 @@ export async function getPatientStats(todayStr?: string) {
                 const reminderDate = new Date();
                 reminderDate.setHours(hours, minutes, 0, 0);
                 const graceEnd = new Date(
-                  reminderDate.getTime() + 6 * 60 * 60 * 1000,
+                  reminderDate.getTime() + gracePeriodMs,
                 );
-                if (new Date() > graceEnd) {
+                if (now.getTime() >= graceEnd.getTime()) {
                   hasMissed = true;
                   status = "missed";
                   break;
@@ -263,10 +310,8 @@ export async function getPatientStats(todayStr?: string) {
               .map(Number);
             const reminderDate = new Date();
             reminderDate.setHours(hours, minutes, 0, 0);
-            const graceEnd = new Date(
-              reminderDate.getTime() + 6 * 60 * 60 * 1000,
-            );
-            if (new Date() > graceEnd) missedThisMonth++;
+            const graceEnd = new Date(reminderDate.getTime() + gracePeriodMs);
+            if (now.getTime() >= graceEnd.getTime()) missedThisMonth++;
           }
         });
       } else {

@@ -128,7 +128,7 @@ const PatientDashboard = ({ selectedDate }: { selectedDate?: string }) => {
         <div className="flex items-center gap-2 mb-4">
           <TrendingUp className="h-5 w-5 text-primary/60" />
           <h2 className="text-sm font-black uppercase tracking-[0.2em] font-heading py-2">
-            Monthly Status Trend
+            Status Trend
           </h2>
         </div>
 

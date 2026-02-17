@@ -241,10 +241,15 @@ export async function getMedications(dateStr?: string) {
       } else if (isPastDay) {
         status = "missed";
       } else if (isToday) {
-        if (now > gracePeriodEnd) {
+        // If the current time is beyond the reminder time + grace window, it's missed
+        if (now.getTime() >= gracePeriodEnd.getTime()) {
           status = "missed";
-        } else {
+        } else if (now.getTime() >= reminderTimeToday.getTime()) {
+          // If we are between the reminder time and grace window, it's pending (needs action)
           status = "pending";
+        } else {
+          // If the reminder time hasn't arrived yet
+          status = "upcoming";
         }
       } else if (isFutureDay) {
         status = "upcoming";
