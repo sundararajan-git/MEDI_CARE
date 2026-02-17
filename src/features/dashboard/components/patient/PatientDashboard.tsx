@@ -6,7 +6,6 @@ import { Suspense, useEffect, useState } from "react";
 import MedicationTable from "@/features/medications/components/MedicationTable";
 import { ListTodo, Calendar, Loader2, Activity } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { MedicationProvider } from "@/providers/MedicationContext";
 import {
   Card,
   CardHeader,
