@@ -115,9 +115,24 @@ export async function addMedication(formData: MedicationFormData) {
   }
 }
 
-export async function getMedications(dateStr?: string, clientNow?: string) {
+export async function getMedications(dateStr?: string, clientInfo?: string) {
   try {
-    const now = clientNow ? new Date(clientNow) : new Date();
+    // Parse client info if available, otherwise fallback to server time
+    let localDateStr = format(new Date(), "yyyy-MM-dd");
+    let localTimeStr = format(new Date(), "HH:mm");
+    let now = new Date();
+
+    if (clientInfo) {
+      try {
+        const info = JSON.parse(clientInfo);
+        localDateStr = info.localDate;
+        localTimeStr = info.localTime;
+        now = new Date(info.now);
+      } catch (e) {
+        console.error("Failed to parse clientInfo", e);
+      }
+    }
+
     // if date check schema
     if (dateStr) {
       const result = dateSchema.safeParse(dateStr);
@@ -149,8 +164,8 @@ export async function getMedications(dateStr?: string, clientNow?: string) {
     const userMetadata = user.user_metadata || {};
     const alertWindowMinutes = userMetadata.alert_window || 120;
 
-    const targetDateObj = dateStr ? parseISO(dateStr) : now;
-    const targetDateISO = format(targetDateObj, "yyyy-MM-dd");
+    const targetDateISO = dateStr || localDateStr;
+    const targetDateObj = parseISO(targetDateISO);
 
     const { data: logs, error: logsError } = await supabase
       .from("medication_logs")
@@ -166,25 +181,25 @@ export async function getMedications(dateStr?: string, clientNow?: string) {
       const created = new Date(med.created_at);
       const deleted = med.deleted_at ? new Date(med.deleted_at) : null;
 
-      // query date
+      // query date boundaries
       const startOfTargetDate = new Date(targetDateISO + "T00:00:00");
       const endOfTargetDate = new Date(targetDateISO + "T23:59:59");
 
       const wasCreated = created <= endOfTargetDate;
-
-      // get logs of med
       const hasLog = logs?.some((l) => l.medication_id === med.id);
 
       let wasActiveAtSomePointToday = !deleted || deleted > startOfTargetDate;
 
-      // if med is deleted on target date
-      // update logic
       if (deleted && isSameDay(deleted, targetDateObj)) {
         const [h, m] = (med.reminder_time || "08:00").split(":").map(Number);
-
-        const reminderTimeOnDeletionDay = new Date(targetDateISO);
-        reminderTimeOnDeletionDay.setHours(h, m, 0, 0);
-
+        const reminderTimeOnDeletionDay = new Date(
+          targetDateISO +
+            "T" +
+            h.toString().padStart(2, "0") +
+            ":" +
+            m.toString().padStart(2, "0") +
+            ":00",
+        );
         const wasScheduledBeforeDeletion = reminderTimeOnDeletionDay <= deleted;
         wasActiveAtSomePointToday = hasLog || wasScheduledBeforeDeletion;
       }
@@ -192,20 +207,19 @@ export async function getMedications(dateStr?: string, clientNow?: string) {
       return wasCreated && wasActiveAtSomePointToday;
     });
 
-    const startOfToday = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
-    startOfToday.setHours(0, 0, 0, 0);
+    // Helper for time comparison in minutes
+    const getMinutes = (timeStr: string) => {
+      const [h, m] = timeStr.split(":").map(Number);
+      return h * 60 + m;
+    };
+
+    const currentLocalMinutes = getMinutes(localTimeStr);
 
     // update the logs with med
     const medicationsWithStatus = activeOnDateMeds.map((med) => {
-      // filter logs
       const log = logs?.find((l) => l.medication_id === med.id);
       const isTaken = log?.status === "taken";
 
-      // is already taken
       if (isTaken) {
         return {
           ...med,
@@ -215,43 +229,23 @@ export async function getMedications(dateStr?: string, clientNow?: string) {
         };
       }
 
-      // pending , upcoming logs
-      const [hours, minutes] = (med.reminder_time || "08:00")
-        .split(":")
-        .map(Number);
-      const reminderTimeToday = new Date(
-        targetDateISO +
-          "T" +
-          hours.toString().padStart(2, "0") +
-          ":" +
-          minutes.toString().padStart(2, "0") +
-          ":00",
-      );
-
-      const gracePeriodEnd = new Date(
-        reminderTimeToday.getTime() + alertWindowMinutes * 60 * 1000,
-      );
-
-      const isToday =
-        format(targetDateObj, "yyyy-MM-dd") === format(now, "yyyy-MM-dd");
-      const isPastDay = targetDateObj < startOfToday;
-      const isFutureDay = targetDateObj > now && !isToday;
+      const isToday = targetDateISO === localDateStr;
+      const isPastDay = targetDateISO < localDateStr;
+      const isFutureDay = targetDateISO > localDateStr;
 
       let status: "missed" | "upcoming" | "pending" | "taken" = "upcoming";
 
-      if (isTaken) {
-        status = "taken";
-      } else if (isPastDay) {
+      if (isPastDay) {
         status = "missed";
       } else if (isToday) {
-        // If the current time is beyond the reminder time + grace window, it's missed
-        if (now.getTime() >= gracePeriodEnd.getTime()) {
+        const reminderMinutes = getMinutes(med.reminder_time || "08:00");
+        const graceMinutes = reminderMinutes + alertWindowMinutes;
+
+        if (currentLocalMinutes >= graceMinutes) {
           status = "missed";
-        } else if (now.getTime() >= reminderTimeToday.getTime()) {
-          // If we are between the reminder time and grace window, it's pending (needs action)
+        } else if (currentLocalMinutes >= reminderMinutes) {
           status = "pending";
         } else {
-          // If the reminder time hasn't arrived yet
           status = "upcoming";
         }
       } else if (isFutureDay) {
@@ -302,8 +296,22 @@ export async function deleteMedication(id: string) {
 export async function logMedication(
   medicationId: string,
   evidenceUrl?: string,
+  clientInfo?: string,
 ) {
   try {
+    let localDateStr = format(new Date(), "yyyy-MM-dd");
+    let nowISO = new Date().toISOString();
+
+    if (clientInfo) {
+      try {
+        const info = JSON.parse(clientInfo);
+        localDateStr = info.localDate;
+        nowISO = info.now;
+      } catch (e) {
+        console.error("Failed to parse clientInfo in log actions", e);
+      }
+    }
+
     // initialize
     const supabase = await createServerSupabase();
     // get user
@@ -314,13 +322,12 @@ export async function logMedication(
 
     if (userError || !user) return { error: "Unauthorized" };
 
-    const today = new Date().toISOString().split("T")[0];
     // check already logged today
     const { data: existingLog, error: logError } = await supabase
       .from("medication_logs")
       .select("status")
       .eq("medication_id", medicationId)
-      .eq("log_date", today)
+      .eq("log_date", localDateStr)
       .maybeSingle();
 
     if (logError) return { error: logError.message };
@@ -342,8 +349,8 @@ export async function logMedication(
       medication_id: medicationId,
       user_id: user.id,
       status: "taken",
-      log_date: today,
-      taken_at: new Date().toISOString(),
+      log_date: localDateStr,
+      taken_at: nowISO,
       evidence_url: evidenceUrl,
     });
 

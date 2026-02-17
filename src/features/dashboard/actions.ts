@@ -9,14 +9,33 @@ import {
   startOfMonth,
   subDays,
   isSameDay,
+  parseISO,
 } from "date-fns";
 
-export async function getPatientStats(todayStr?: string, clientNow?: string) {
+export async function getPatientStats(todayStr?: string, clientInfo?: string) {
   try {
+    // Parse client info if available, otherwise fallback to server time
+    let localDateStr = format(new Date(), "yyyy-MM-dd");
+    let localTimeStr = format(new Date(), "HH:mm");
+    let now = new Date();
+
+    if (clientInfo) {
+      try {
+        const info = JSON.parse(clientInfo);
+        localDateStr = info.localDate;
+        localTimeStr = info.localTime;
+        now = new Date(info.now);
+      } catch (e) {
+        console.error("Failed to parse clientInfo", e);
+      }
+    }
+
+    const todayISO = todayStr || localDateStr;
+    const todayObj = parseISO(todayISO);
+
     // Initialize Supabase and get current user
     const supabase = await createServerSupabase();
-    const now = clientNow ? new Date(clientNow) : new Date();
-    const today = todayStr ? new Date(todayStr.replace(/-/g, "/")) : now;
+
     // Verify user is authenticated
     const {
       data: { user },
@@ -24,6 +43,7 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
     } = await supabase.auth.getUser();
 
     if (userError || !user) return { error: "Unauthorized" };
+
     // Fetch all active medications for the user
     const { data: medications, error: medError } = await supabase
       .from("medications")
@@ -48,8 +68,8 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
       };
     }
 
-    const startOfHistory = subDays(today, 90);
-    const startOfHistoryISO = startOfHistory.toISOString().split("T")[0];
+    const startOfHistory = subDays(todayObj, 90);
+    const startOfHistoryISO = format(startOfHistory, "yyyy-MM-dd");
 
     // Fetch medication logs for last 90 days
     const { data: logs, error: logsError } = await supabase
@@ -76,6 +96,12 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
       }
     });
 
+    // Helper for minutes conversion
+    const getMinutes = (timeStr: string) => {
+      const [h, m] = timeStr.split(":").map(Number);
+      return h * 60 + m;
+    };
+
     // Get medications active on a specific date (respects creation/deletion dates)
     const getActiveMedsForDate = (date: Date) => {
       const dateStr = format(date, "yyyy-MM-dd");
@@ -96,9 +122,14 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
           const [h, m_time] = (m.reminder_time || "08:00")
             .split(":")
             .map(Number);
-          const reminderTimeOnDeletionDay = new Date(dateStr);
-          reminderTimeOnDeletionDay.setHours(h, m_time, 0, 0);
-
+          const reminderTimeOnDeletionDay = new Date(
+            dateStr +
+              "T" +
+              h.toString().padStart(2, "0") +
+              ":" +
+              m_time.toString().padStart(2, "0") +
+              ":00",
+          );
           const wasScheduledBeforeDeletion =
             reminderTimeOnDeletionDay <= deleted;
           wasActive = hasLog || wasScheduledBeforeDeletion;
@@ -111,14 +142,13 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
     // Use alert window from user metadata or default to 120 minutes
     const userMetadata = (user.user_metadata as any) || {};
     const alertWindowMinutes = userMetadata.alert_window || 120;
-    const gracePeriodMs = alertWindowMinutes * 60 * 1000;
 
     // Calculate medication adherence streak (consecutive complete days)
     let streak = 0;
-    const todayKey = format(today, "yyyy-MM-dd");
+    const currentLocalMinutes = getMinutes(localTimeStr);
 
-    const activeTodayMeds = getActiveMedsForDate(today);
-    const takenTodaySet = logsByDate[todayKey] || new Set();
+    const activeTodayMeds = getActiveMedsForDate(todayObj);
+    const takenTodaySet = logsByDate[todayISO] || new Set();
 
     // Determine today's state
     const isTodayComplete =
@@ -126,27 +156,28 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
       activeTodayMeds.every((m) => takenTodaySet.has(m.id));
 
     let hasTodayMissed = false;
-    if (!isTodayComplete && activeTodayMeds.length > 0) {
+    if (
+      !isTodayComplete &&
+      activeTodayMeds.length > 0 &&
+      todayISO === localDateStr
+    ) {
       for (const med of activeTodayMeds) {
         if (!takenTodaySet.has(med.id)) {
-          const [h, m] = med.reminder_time.split(":").map(Number);
-          const remDate = new Date(
-            todayKey +
-              "T" +
-              h.toString().padStart(2, "0") +
-              ":" +
-              m.toString().padStart(2, "0") +
-              ":00",
-          );
+          const reminderMinutes = getMinutes(med.reminder_time || "08:00");
+          const graceMinutes = reminderMinutes + alertWindowMinutes;
 
-          // Use the dynamic grace period
-          const graceEnd = new Date(remDate.getTime() + gracePeriodMs);
-          if (now.getTime() >= graceEnd.getTime()) {
+          if (currentLocalMinutes >= graceMinutes) {
             hasTodayMissed = true;
             break;
           }
         }
       }
+    } else if (
+      !isTodayComplete &&
+      activeTodayMeds.length > 0 &&
+      todayISO < localDateStr
+    ) {
+      hasTodayMissed = true;
     }
 
     if (isTodayComplete) {
@@ -154,39 +185,29 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
     } else if (hasTodayMissed) {
       streak = 0;
     } else {
-      // Not complete yet but not missed. Today doesn't contribute to streak count yet,
-      // but the streak can continue from yesterday.
       streak = 0;
     }
 
     // Count consecutive complete days going backwards from yesterday
-    // If today is missed, we don't look back (or we could, but a missed dose usually breaks the active streak)
     if (!hasTodayMissed) {
-      let checkDate = subDays(today, 1);
+      let checkDate = subDays(todayObj, 1);
       let daysChecked = 0;
-      // Look back up to 365 days
       while (daysChecked < 365) {
         const activeMeds = getActiveMedsForDate(checkDate);
-
-        // If no meds scheduled for this day, skip it and continue the streak
         if (activeMeds.length === 0) {
           checkDate = subDays(checkDate, 1);
           daysChecked++;
-          // Safety break if we go back 30 days and find no medications
           if (daysChecked > 30 && streak === 0) break;
           continue;
         }
-
         const dKey = format(checkDate, "yyyy-MM-dd");
         const takenSet = logsByDate[dKey] || new Set();
         const isComplete = activeMeds.every((m) => takenSet.has(m.id));
-
         if (isComplete) {
           streak++;
           checkDate = subDays(checkDate, 1);
           daysChecked++;
         } else {
-          // Streak broken in history
           break;
         }
       }
@@ -205,12 +226,12 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
     let totalOpportunities = 0;
     let totalTaken = 0;
 
-    const monthStart = startOfMonth(today);
-    const daysInMonth = differenceInDays(today, monthStart) + 1;
+    const monthStart = startOfMonth(todayObj);
+    const daysInMonth = differenceInDays(todayObj, monthStart) + 1;
 
     // Sum all opportunities and completions for the month
     for (let i = 0; i < daysInMonth; i++) {
-      const d = subDays(today, i);
+      const d = subDays(todayObj, i);
       const dKey = format(d, "yyyy-MM-dd");
       const activeMeds = getActiveMedsForDate(d);
 
@@ -231,10 +252,10 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
 
     // Build 90-day calendar history for visualization
     const history = [];
-    const startCalendar = subDays(today, 90);
+    const startCalendar = subDays(todayObj, 90);
 
     // Iterate through each day and determine status (empty, complete, partial, missed)
-    for (let d = startCalendar; d <= today; d = addDays(d, 1)) {
+    for (let d = startCalendar; d <= todayObj; d = addDays(d, 1)) {
       const dKey = format(d, "yyyy-MM-dd");
       const activeMeds = getActiveMedsForDate(d);
       const takenSet = logsByDate[dKey] || new Set();
@@ -245,7 +266,7 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
       let hasMissed = false;
 
       // Determine day status: empty, complete, partial, missed, or future
-      if (d <= today) {
+      if (d <= todayObj) {
         if (activeMeds.length === 0) {
           status = "empty";
         } else {
@@ -254,26 +275,17 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
           else if (takenCount > 0) status = "partial";
           else status = "missed";
 
-          if (isSameDay(d, today)) {
+          if (dKey === localDateStr) {
             if (status === "missed") status = "future";
 
             for (const med of activeMeds) {
               if (!takenSet.has(med.id)) {
-                const [hours, minutes] = (med.reminder_time || "08:00")
-                  .split(":")
-                  .map(Number);
-                const reminderDate = new Date(
-                  dKey +
-                    "T" +
-                    hours.toString().padStart(2, "0") +
-                    ":" +
-                    minutes.toString().padStart(2, "0") +
-                    ":00",
+                const reminderMinutes = getMinutes(
+                  med.reminder_time || "08:00",
                 );
-                const graceEnd = new Date(
-                  reminderDate.getTime() + gracePeriodMs,
-                );
-                if (now.getTime() >= graceEnd.getTime()) {
+                const graceMinutes = reminderMinutes + alertWindowMinutes;
+
+                if (currentLocalMinutes >= graceMinutes) {
                   hasMissed = true;
                   status = "missed";
                   break;
@@ -283,7 +295,7 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
             if (!hasMissed && takenCount === 0) status = "future";
             if (!hasMissed && takenCount > 0 && takenCount < activeMeds.length)
               status = "partial";
-          } else {
+          } else if (dKey < localDateStr) {
             if (takenCount < activeMeds.length) hasMissed = true;
           }
         }
@@ -300,7 +312,7 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
     }
 
     // Count missed doses this month (past and current day)
-    const currentMonthStart = startOfMonth(today);
+    const currentMonthStart = startOfMonth(todayObj);
 
     const currentMonthStartISO = format(currentMonthStart, "yyyy-MM-dd");
     let missedThisMonth = 0;
@@ -309,28 +321,18 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
     history.forEach((h) => {
       if (h.date < currentMonthStartISO) return;
 
-      if (h.date === todayKey) {
-        const activeMeds = getActiveMedsForDate(today);
-        const takenSet = logsByDate[todayKey] || new Set();
+      if (h.date === localDateStr) {
+        const activeMeds = getActiveMedsForDate(todayObj);
+        const takenSet = logsByDate[h.date] || new Set();
 
         activeMeds.forEach((med) => {
           if (!takenSet.has(med.id)) {
-            const [hours, minutes] = (med.reminder_time || "08:00")
-              .split(":")
-              .map(Number);
-            const reminderDate = new Date(
-              todayKey +
-                "T" +
-                hours.toString().padStart(2, "0") +
-                ":" +
-                minutes.toString().padStart(2, "0") +
-                ":00",
-            );
-            const graceEnd = new Date(reminderDate.getTime() + gracePeriodMs);
-            if (now.getTime() >= graceEnd.getTime()) missedThisMonth++;
+            const reminderMinutes = getMinutes(med.reminder_time || "08:00");
+            const graceMinutes = reminderMinutes + alertWindowMinutes;
+            if (currentLocalMinutes >= graceMinutes) missedThisMonth++;
           }
         });
-      } else {
+      } else if (h.date < localDateStr) {
         missedThisMonth += h.total - h.taken;
       }
     });
@@ -338,14 +340,14 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
     // Count complete days (all meds taken) in the last 7 days
     let takenThisWeek = 0;
     for (let i = 0; i < 7; i++) {
-      const d = subDays(today, i);
+      const d = subDays(todayObj, i);
       const dKey = format(d, "yyyy-MM-dd");
       const hEntry = history.find((h) => h.date === dKey);
       if (hEntry && hEntry.status === "complete") takenThisWeek++;
     }
 
     // Calculate remaining days until end of month
-    const remainingDays = differenceInDays(endOfMonth(today), today);
+    const remainingDays = differenceInDays(endOfMonth(todayObj), todayObj);
 
     // Format recent activity (last 10 log entries)
     const recentActivityLogs = logs
@@ -390,8 +392,21 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
   }
 }
 
-export async function markAllMedicationsTaken() {
+export async function markAllMedicationsTaken(clientInfo?: string) {
   try {
+    let localDateStr = format(new Date(), "yyyy-MM-dd");
+    let nowISO = new Date().toISOString();
+
+    if (clientInfo) {
+      try {
+        const info = JSON.parse(clientInfo);
+        localDateStr = info.localDate;
+        nowISO = info.now;
+      } catch (e) {
+        console.error("Failed to parse clientInfo in bulk log", e);
+      }
+    }
+
     // Initialize Supabase and get current user
     const supabase = await createServerSupabase();
     const {
@@ -412,15 +427,12 @@ export async function markAllMedicationsTaken() {
     // Skip if no medications exist
     if (!medications || medications.length === 0) return { success: true };
 
-    // Get today's date in ISO format
-    const today = new Date().toISOString().split("T")[0];
-
-    // Fetch logs already recorded for today
+    // Fetch logs already recorded for today in local time
     const { data: logs, error: logsError } = await supabase
       .from("medication_logs")
       .select("medication_id")
       .eq("user_id", user.id)
-      .eq("log_date", today);
+      .eq("log_date", localDateStr);
 
     if (logsError) throw new Error(logsError.message);
 
@@ -434,8 +446,8 @@ export async function markAllMedicationsTaken() {
         user_id: user.id,
         medication_id: m.id,
         status: "taken",
-        log_date: today,
-        taken_at: new Date().toISOString(),
+        log_date: localDateStr,
+        taken_at: nowISO,
       }));
 
     // Bulk insert unmapped medications as taken

@@ -84,7 +84,18 @@ const LogEvidenceModal = ({
       }
 
       // log
-      const result = await logMedication(medicationId, finalUrl);
+      const now = new Date();
+      const clientInfo = JSON.stringify({
+        now: now.toISOString(),
+        localDate: new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+          .toISOString()
+          .split("T")[0],
+        localTime:
+          now.getHours().toString().padStart(2, "0") +
+          ":" +
+          now.getMinutes().toString().padStart(2, "0"),
+      });
+      const result = await logMedication(medicationId, finalUrl, clientInfo);
 
       if (result.error) {
         toast.error(result.error);

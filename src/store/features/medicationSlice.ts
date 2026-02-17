@@ -25,8 +25,20 @@ export const fetchMedications = createAsyncThunk(
   "medications/fetchMedications",
   async (dateStr: string | undefined, { rejectWithValue }) => {
     try {
-      const clientNow = new Date().toISOString();
-      const result = await getMedications(dateStr, clientNow);
+      const now = new Date();
+      // Send local time information as a single JSON string
+      const clientInfo = JSON.stringify({
+        now: now.toISOString(),
+        localDate: new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+          .toISOString()
+          .split("T")[0],
+        localTime:
+          now.getHours().toString().padStart(2, "0") +
+          ":" +
+          now.getMinutes().toString().padStart(2, "0"),
+      });
+
+      const result = await getMedications(dateStr, clientInfo);
       if (result.error) {
         return rejectWithValue(result.error);
       }
@@ -43,8 +55,19 @@ export const fetchStats = createAsyncThunk(
   "medications/fetchStats",
   async (dateStr: string | undefined, { rejectWithValue }) => {
     try {
-      const clientNow = new Date().toISOString();
-      const result = await getPatientStats(dateStr, clientNow);
+      const now = new Date();
+      const clientInfo = JSON.stringify({
+        now: now.toISOString(),
+        localDate: new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+          .toISOString()
+          .split("T")[0],
+        localTime:
+          now.getHours().toString().padStart(2, "0") +
+          ":" +
+          now.getMinutes().toString().padStart(2, "0"),
+      });
+
+      const result = await getPatientStats(dateStr, clientInfo);
       if ("error" in result && result.error) {
         return rejectWithValue(result.error);
       }

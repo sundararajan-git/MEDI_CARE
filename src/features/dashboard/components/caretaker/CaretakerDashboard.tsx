@@ -142,7 +142,18 @@ const CaretakerDashboard = ({
   const handleSync = async () => {
     toast.loading("Syncing medication status...", { id: "sync" });
     try {
-      await checkMissedDosesAndNotify();
+      const now = new Date();
+      const clientInfo = JSON.stringify({
+        now: now.toISOString(),
+        localDate: new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+          .toISOString()
+          .split("T")[0],
+        localTime:
+          now.getHours().toString().padStart(2, "0") +
+          ":" +
+          now.getMinutes().toString().padStart(2, "0"),
+      });
+      await checkMissedDosesAndNotify(clientInfo);
       triggerRefresh();
       toast.success("Medications synced successfully!", { id: "sync" });
     } catch (error) {

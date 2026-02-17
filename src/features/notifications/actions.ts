@@ -40,14 +40,28 @@ async function sendEmail(to: string, subject: string, message: string) {
 
     return { success: true, data: data?.data };
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : "Error occurred on the send email";
+    const errorMessage =
+      err instanceof Error ? err.message : "Error occurred on the send email";
     return { error: errorMessage };
   }
 }
 
 // currently client side context refresh via check in future go with edge function trigger
-export async function checkMissedDosesAndNotify() {
+export async function checkMissedDosesAndNotify(clientInfo?: string) {
   try {
+    let localDateStr = format(new Date(), "yyyy-MM-dd");
+    let localTimeStr = format(new Date(), "HH:mm");
+
+    if (clientInfo) {
+      try {
+        const info = JSON.parse(clientInfo);
+        localDateStr = info.localDate;
+        localTimeStr = info.localTime;
+      } catch (e) {
+        console.error("Failed to parse clientInfo in notification action", e);
+      }
+    }
+
     // initialize
     const supabase = await createServerSupabase();
     // get user
@@ -59,13 +73,12 @@ export async function checkMissedDosesAndNotify() {
 
     // get email + grace time
     const caretakerEmail = user.user_metadata?.caretaker_email;
-    const alertWindow = user.user_metadata?.alert_window || 120;
+    const alertWindowMinutes = user.user_metadata?.alert_window || 120;
 
     if (!caretakerEmail) {
       return { error: "Caretaker email is not configured." };
     }
 
-    const todayISO = format(new Date(), "yyyy-MM-dd");
     // get undeleted medications
     const { data: medications } = await supabase
       .from("medications")
@@ -76,7 +89,13 @@ export async function checkMissedDosesAndNotify() {
       return { success: true, message: "No active medications." };
     }
 
-    const now = new Date();
+    // Helper for minutes conversion
+    const getMinutes = (timeStr: string) => {
+      const [h, m] = timeStr.split(":").map(Number);
+      return h * 60 + m;
+    };
+
+    const currentLocalMinutes = getMinutes(localTimeStr);
     let notificationsSent = 0;
 
     for (const med of medications) {
@@ -85,29 +104,23 @@ export async function checkMissedDosesAndNotify() {
         .from("medication_logs")
         .select("status")
         .eq("medication_id", med.id)
-        .eq("log_date", todayISO)
+        .eq("log_date", localDateStr)
         .maybeSingle();
 
       if (existingLog) continue;
 
-      // destructure hours , minutes
-      const [hours, minutes] = med.reminder_time.split(":").map(Number);
-      const reminderDate = new Date();
-      reminderDate.setHours(hours, minutes, 0, 0);
+      const reminderMinutes = getMinutes(med.reminder_time || "08:00");
+      const graceMinutes = reminderMinutes + alertWindowMinutes;
 
-      const gracePeriodEnd = new Date(
-        reminderDate.getTime() + alertWindow * 60 * 1000,
-      );
-
-      // update the in log
-      if (now > gracePeriodEnd) {
+      // If the current local time is beyond the grace period
+      if (currentLocalMinutes >= graceMinutes) {
         const { error: insertError } = await supabase
           .from("medication_logs")
           .insert({
             medication_id: med.id,
             user_id: user.id,
             status: "missed",
-            log_date: todayISO,
+            log_date: localDateStr,
             taken_at: null,
           });
 
@@ -115,7 +128,8 @@ export async function checkMissedDosesAndNotify() {
           continue;
         }
 
-        const patientName = user.email?.split("@")[0].replace(/[._]/g, " ") || "Patient";
+        const patientName =
+          user.email?.split("@")[0].replace(/[._]/g, " ") || "Patient";
 
         // send email
         const subject = `⚠️ Alert: Missed Dose Detected - ${med.name}`;
@@ -142,7 +156,6 @@ export async function checkMissedDosesAndNotify() {
     return { error: error.message || "Failed to process missed doses" };
   }
 }
-
 
 // development test email
 export async function sendTestNotification() {
