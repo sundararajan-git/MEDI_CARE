@@ -155,7 +155,7 @@ export async function getMedications(dateStr?: string, clientInfo?: string) {
       .from("medications")
       .select("*")
       .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+      .order("reminder_time", { ascending: true });
 
     if (error) {
       return { error: error.message, data: [] };

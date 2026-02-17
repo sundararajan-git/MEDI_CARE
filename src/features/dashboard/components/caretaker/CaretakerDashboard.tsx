@@ -83,7 +83,8 @@ const CaretakerDashboard = ({
     dispatch(fetchStats(undefined));
   }, [dispatch]);
 
-  if (loading && !stats) {
+  // loading stage - check if loading OR if it's the initial state (no stats and no error yet)
+  if (loading || (!stats && !error)) {
     return (
       <div className="flex flex-col gap-8 w-full animate-in fade-in duration-500">
         <div className="flex flex-col gap-2">
@@ -105,13 +106,17 @@ const CaretakerDashboard = ({
     );
   }
 
-  if (error || !stats) {
+  if (error) {
     return (
       <div className="p-4 rounded-lg bg-red-50 text-red-600 border border-red-200 text-center">
-        {error || "Unable to load patient data. Please try again later."}
+        {error}
       </div>
     );
   }
+
+  // Final check to satisfy TypeScript - if loading is false and stats is still null,
+  // though logically covered by the loading check above.
+  if (!stats) return null;
 
   const {
     streak = 0,
@@ -266,7 +271,7 @@ const CaretakerDashboard = ({
                 <div className="w-full border-t border-foreground" />
                 <div className="w-full border-t border-foreground" />
               </div>
-              {history.slice(-7).map((day, idx: number) => {
+              {(history || []).slice(-7).map((day: any, idx: number) => {
                 const dayName = format(parseISO(day.date), "EEE");
                 const height =
                   day.total > 0 ? (day.taken / day.total) * 100 : 0;

@@ -30,8 +30,28 @@ export const MedicationProvider = ({ children }: { children: ReactNode }) => {
   );
 
   useEffect(() => {
-    // if missed med sent alert email
-    checkMissedDosesAndNotify();
+    const runCheck = async () => {
+      const now = new Date();
+      const clientInfo = JSON.stringify({
+        now: now.toISOString(),
+        localDate: new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+          .toISOString()
+          .split("T")[0],
+        localTime:
+          now.getHours().toString().padStart(2, "0") +
+          ":" +
+          now.getMinutes().toString().padStart(2, "0"),
+      });
+      await checkMissedDosesAndNotify(clientInfo);
+    };
+
+    // Run on mount
+    runCheck();
+
+    // Set up polling every 15 minutes (900,000 ms) while the tab is open
+    const interval = setInterval(runCheck, 15 * 60 * 1000);
+
+    return () => clearInterval(interval);
   }, []);
 
   // refresh handler
@@ -39,6 +59,20 @@ export const MedicationProvider = ({ children }: { children: ReactNode }) => {
     debounce(() => {
       dispatch(fetchMedications(selectedDate || undefined));
       dispatch(fetchStats(undefined));
+
+      // Also trigger a notification check on manual refresh
+      const now = new Date();
+      const clientInfo = JSON.stringify({
+        now: now.toISOString(),
+        localDate: new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+          .toISOString()
+          .split("T")[0],
+        localTime:
+          now.getHours().toString().padStart(2, "0") +
+          ":" +
+          now.getMinutes().toString().padStart(2, "0"),
+      });
+      checkMissedDosesAndNotify(clientInfo);
     }, 300),
     [dispatch, selectedDate],
   );

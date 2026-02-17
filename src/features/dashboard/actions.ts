@@ -44,11 +44,12 @@ export async function getPatientStats(todayStr?: string, clientInfo?: string) {
 
     if (userError || !user) return { error: "Unauthorized" };
 
-    // Fetch all active medications for the user
+    // Fetch all active medications for the user (ordered by reminder time)
     const { data: medications, error: medError } = await supabase
       .from("medications")
       .select("*")
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .order("reminder_time", { ascending: true });
 
     if (medError) throw new Error(medError.message);
 
@@ -75,7 +76,7 @@ export async function getPatientStats(todayStr?: string, clientInfo?: string) {
     const { data: logs, error: logsError } = await supabase
       .from("medication_logs")
       .select(
-        "medication_id, log_date, status, evidence_url, medications(name)",
+        "medication_id, log_date, status, evidence_url, taken_at, medications(name, reminder_time)",
       )
       .eq("user_id", user.id)
       .gte("log_date", startOfHistoryISO);
@@ -101,6 +102,8 @@ export async function getPatientStats(todayStr?: string, clientInfo?: string) {
       const [h, m] = timeStr.split(":").map(Number);
       return h * 60 + m;
     };
+
+    const currentLocalMinutes = getMinutes(localTimeStr);
 
     // Get medications active on a specific date (respects creation/deletion dates)
     const getActiveMedsForDate = (date: Date) => {
@@ -145,7 +148,6 @@ export async function getPatientStats(todayStr?: string, clientInfo?: string) {
 
     // Calculate medication adherence streak (consecutive complete days)
     let streak = 0;
-    const currentLocalMinutes = getMinutes(localTimeStr);
 
     const activeTodayMeds = getActiveMedsForDate(todayObj);
     const takenTodaySet = logsByDate[todayISO] || new Set();
@@ -359,17 +361,30 @@ export async function getPatientStats(todayStr?: string, clientInfo?: string) {
           .slice(0, 10)
       : [];
 
-    const recentActivity = recentActivityLogs.map((log) => ({
-      id: log.medication_id + log.log_date,
-      date: format(new Date(log.log_date), "EEEE, MMMM d"),
-      time: "",
-      status: log.status === "taken" ? "Completed" : "Missed",
-      medication: Array.isArray(log.medications)
-        ? log.medications[0]?.name || "Unknown Medication"
-        : (log.medications as any)?.name || "Unknown Medication",
-      type: log.status,
-      evidenceUrl: log.evidence_url,
-    }));
+    const recentActivity = recentActivityLogs.map((log) => {
+      const medData = Array.isArray(log.medications)
+        ? log.medications[0]
+        : log.medications;
+      const displayTime = log.taken_at
+        ? format(new Date(log.taken_at), "hh:mm a")
+        : (() => {
+            const timeStr = (medData as any)?.reminder_time || "08:00";
+            const [h, m] = timeStr.split(":");
+            const hour = parseInt(h);
+            const ampm = hour >= 12 ? "PM" : "AM";
+            return `${hour % 12 || 12}:${m} ${ampm}`;
+          })();
+
+      return {
+        id: log.medication_id + log.log_date,
+        date: format(new Date(log.log_date), "EEEE, MMMM d"),
+        time: displayTime,
+        status: log.status === "taken" ? "Completed" : "Missed",
+        medication: (medData as any)?.name || "Unknown Medication",
+        type: log.status,
+        evidenceUrl: log.evidence_url,
+      };
+    });
 
     // Return all calculated stats
     return {

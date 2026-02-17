@@ -56,8 +56,8 @@ const PatientDashboard = ({ selectedDate }: { selectedDate?: string }) => {
 
   const defaultTab = selectedDate ? "activity" : "today";
 
-  // loading stage
-  if (loading) {
+  // loading stage - check if loading OR if it's the initial state (no stats and no error yet)
+  if (loading || (!stats && !error)) {
     return (
       <div className="flex flex-col gap-8 w-full animate-in fade-in duration-500">
         <div className="flex flex-col gap-2">
@@ -80,13 +80,15 @@ const PatientDashboard = ({ selectedDate }: { selectedDate?: string }) => {
     );
   }
 
-  if (error || !stats) {
+  if (error) {
     return (
       <div className="p-4 rounded-lg bg-red-50 text-red-600 border border-red-200 text-center">
-        {error || "Unable to load patient data. Please try again later."}
+        {error}
       </div>
     );
   }
+
+  if (!stats) return null;
 
   const {
     streak = 0,

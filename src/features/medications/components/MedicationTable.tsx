@@ -45,8 +45,8 @@ const MedicationTable = ({
     dispatch(setSelectedDate(dateStr || null));
   }, [dateStr, dispatch]);
 
-  // loading stage
-  if (loading) {
+  // loading stage - check if loading OR if it's the initial state (no meds and no error yet)
+  if (loading || (medications.length === 0 && !error)) {
     return (
       <div className="flex flex-col items-center justify-center p-12 text-muted-foreground bg-muted/5 gap-3">
         <Loader2 className="h-8 w-8 animate-spin text-primary/40" />

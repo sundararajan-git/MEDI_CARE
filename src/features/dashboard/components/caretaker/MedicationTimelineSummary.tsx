@@ -109,7 +109,15 @@ function MedicationTimelineSummary({ dateStr }: { dateStr: string }) {
                   </span>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">
-                      {med.reminder_time}
+                      {(() => {
+                        const [h, m] = med.reminder_time?.split(":") || [
+                          "08",
+                          "00",
+                        ];
+                        const hour = parseInt(h);
+                        const ampm = hour >= 12 ? "PM" : "AM";
+                        return `${hour % 12 || 12}:${m || "00"} ${ampm}`;
+                      })()}
                     </span>
                     <div className="size-1 rounded-full bg-muted-foreground/30" />
                     <span className="text-[10px] font-bold text-muted-foreground/40">
