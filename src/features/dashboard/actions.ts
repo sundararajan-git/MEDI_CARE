@@ -79,10 +79,8 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
     // Get medications active on a specific date (respects creation/deletion dates)
     const getActiveMedsForDate = (date: Date) => {
       const dateStr = format(date, "yyyy-MM-dd");
-      const startOfDate = new Date(dateStr);
-      startOfDate.setHours(0, 0, 0, 0);
-      const endOfDate = new Date(dateStr);
-      endOfDate.setHours(23, 59, 59, 999);
+      const startOfDate = new Date(dateStr + "T00:00:00");
+      const endOfDate = new Date(dateStr + "T23:59:59");
 
       return medications.filter((m) => {
         const created = new Date(m.created_at);
@@ -132,8 +130,14 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
       for (const med of activeTodayMeds) {
         if (!takenTodaySet.has(med.id)) {
           const [h, m] = med.reminder_time.split(":").map(Number);
-          const remDate = new Date(today);
-          remDate.setHours(h, m, 0, 0);
+          const remDate = new Date(
+            todayKey +
+              "T" +
+              h.toString().padStart(2, "0") +
+              ":" +
+              m.toString().padStart(2, "0") +
+              ":00",
+          );
 
           // Use the dynamic grace period
           const graceEnd = new Date(remDate.getTime() + gracePeriodMs);
@@ -258,8 +262,14 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
                 const [hours, minutes] = (med.reminder_time || "08:00")
                   .split(":")
                   .map(Number);
-                const reminderDate = new Date(d);
-                reminderDate.setHours(hours, minutes, 0, 0);
+                const reminderDate = new Date(
+                  dKey +
+                    "T" +
+                    hours.toString().padStart(2, "0") +
+                    ":" +
+                    minutes.toString().padStart(2, "0") +
+                    ":00",
+                );
                 const graceEnd = new Date(
                   reminderDate.getTime() + gracePeriodMs,
                 );
@@ -308,8 +318,14 @@ export async function getPatientStats(todayStr?: string, clientNow?: string) {
             const [hours, minutes] = (med.reminder_time || "08:00")
               .split(":")
               .map(Number);
-            const reminderDate = new Date(today);
-            reminderDate.setHours(hours, minutes, 0, 0);
+            const reminderDate = new Date(
+              todayKey +
+                "T" +
+                hours.toString().padStart(2, "0") +
+                ":" +
+                minutes.toString().padStart(2, "0") +
+                ":00",
+            );
             const graceEnd = new Date(reminderDate.getTime() + gracePeriodMs);
             if (now.getTime() >= graceEnd.getTime()) missedThisMonth++;
           }

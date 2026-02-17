@@ -149,7 +149,7 @@ export async function getMedications(dateStr?: string, clientNow?: string) {
     const userMetadata = user.user_metadata || {};
     const alertWindowMinutes = userMetadata.alert_window || 120;
 
-    const targetDateObj = dateStr ? parseISO(dateStr) : new Date();
+    const targetDateObj = dateStr ? parseISO(dateStr) : now;
     const targetDateISO = format(targetDateObj, "yyyy-MM-dd");
 
     const { data: logs, error: logsError } = await supabase
@@ -167,11 +167,8 @@ export async function getMedications(dateStr?: string, clientNow?: string) {
       const deleted = med.deleted_at ? new Date(med.deleted_at) : null;
 
       // query date
-      const startOfTargetDate = new Date(targetDateISO);
-      startOfTargetDate.setHours(0, 0, 0, 0);
-
-      const endOfTargetDate = new Date(targetDateISO);
-      endOfTargetDate.setHours(23, 59, 59, 999);
+      const startOfTargetDate = new Date(targetDateISO + "T00:00:00");
+      const endOfTargetDate = new Date(targetDateISO + "T23:59:59");
 
       const wasCreated = created <= endOfTargetDate;
 
@@ -222,8 +219,14 @@ export async function getMedications(dateStr?: string, clientNow?: string) {
       const [hours, minutes] = (med.reminder_time || "08:00")
         .split(":")
         .map(Number);
-      const reminderTimeToday = new Date(targetDateObj);
-      reminderTimeToday.setHours(hours, minutes, 0, 0);
+      const reminderTimeToday = new Date(
+        targetDateISO +
+          "T" +
+          hours.toString().padStart(2, "0") +
+          ":" +
+          minutes.toString().padStart(2, "0") +
+          ":00",
+      );
 
       const gracePeriodEnd = new Date(
         reminderTimeToday.getTime() + alertWindowMinutes * 60 * 1000,
