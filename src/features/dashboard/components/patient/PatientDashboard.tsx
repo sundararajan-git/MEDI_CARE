@@ -64,8 +64,7 @@ const PatientDashboard = ({ selectedDate }: { selectedDate?: string }) => {
           <Skeleton className="h-10 w-64" />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <Skeleton className="h-32 rounded-xl" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Skeleton className="h-32 rounded-xl" />
           <Skeleton className="h-32 rounded-xl" />
           <Skeleton className="h-32 rounded-xl" />

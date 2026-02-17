@@ -92,8 +92,7 @@ const CaretakerDashboard = ({
           <Skeleton className="h-12 w-80" />
           <Skeleton className="h-4 w-64" />
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Skeleton className="h-40 w-full rounded-2xl" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <Skeleton className="h-40 w-full rounded-2xl" />
           <Skeleton className="h-40 w-full rounded-2xl" />
           <Skeleton className="h-40 w-full rounded-2xl" />
@@ -205,7 +204,7 @@ const CaretakerDashboard = ({
           </h2>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <MetricCard
             title="Today's Goal"
             value={`${todayStatus}%`}
@@ -226,12 +225,12 @@ const CaretakerDashboard = ({
             icon={<AlertCircle />}
             color="red"
           />
-          <MetricCard
+          {/* <MetricCard
             title="Active Streak"
             value={streak}
             icon={<Flame />}
             color="orange"
-          />
+          /> */}
         </div>
         <br />
         <br />
