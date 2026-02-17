@@ -115,8 +115,9 @@ export async function addMedication(formData: MedicationFormData) {
   }
 }
 
-export async function getMedications(dateStr?: string) {
+export async function getMedications(dateStr?: string, clientNow?: string) {
   try {
+    const now = clientNow ? new Date(clientNow) : new Date();
     // if date check schema
     if (dateStr) {
       const result = dateSchema.safeParse(dateStr);
@@ -194,7 +195,6 @@ export async function getMedications(dateStr?: string) {
       return wasCreated && wasActiveAtSomePointToday;
     });
 
-    const now = new Date();
     const startOfToday = new Date(
       now.getFullYear(),
       now.getMonth(),

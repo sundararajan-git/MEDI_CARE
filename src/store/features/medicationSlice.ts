@@ -25,7 +25,8 @@ export const fetchMedications = createAsyncThunk(
   "medications/fetchMedications",
   async (dateStr: string | undefined, { rejectWithValue }) => {
     try {
-      const result = await getMedications(dateStr);
+      const clientNow = new Date().toISOString();
+      const result = await getMedications(dateStr, clientNow);
       if (result.error) {
         return rejectWithValue(result.error);
       }
@@ -42,7 +43,8 @@ export const fetchStats = createAsyncThunk(
   "medications/fetchStats",
   async (dateStr: string | undefined, { rejectWithValue }) => {
     try {
-      const result = await getPatientStats(dateStr);
+      const clientNow = new Date().toISOString();
+      const result = await getPatientStats(dateStr, clientNow);
       if ("error" in result && result.error) {
         return rejectWithValue(result.error);
       }

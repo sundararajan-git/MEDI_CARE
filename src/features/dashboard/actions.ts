@@ -11,11 +11,12 @@ import {
   isSameDay,
 } from "date-fns";
 
-export async function getPatientStats(todayStr?: string) {
+export async function getPatientStats(todayStr?: string, clientNow?: string) {
   try {
     // Initialize Supabase and get current user
     const supabase = await createServerSupabase();
-    const today = todayStr ? new Date(todayStr.replace(/-/g, "/")) : new Date();
+    const now = clientNow ? new Date(clientNow) : new Date();
+    const today = todayStr ? new Date(todayStr.replace(/-/g, "/")) : now;
     // Verify user is authenticated
     const {
       data: { user },
@@ -116,7 +117,6 @@ export async function getPatientStats(todayStr?: string) {
 
     // Calculate medication adherence streak (consecutive complete days)
     let streak = 0;
-    const now = new Date();
     const todayKey = format(today, "yyyy-MM-dd");
 
     const activeTodayMeds = getActiveMedsForDate(today);
@@ -258,7 +258,7 @@ export async function getPatientStats(todayStr?: string) {
                 const [hours, minutes] = (med.reminder_time || "08:00")
                   .split(":")
                   .map(Number);
-                const reminderDate = new Date();
+                const reminderDate = new Date(d);
                 reminderDate.setHours(hours, minutes, 0, 0);
                 const graceEnd = new Date(
                   reminderDate.getTime() + gracePeriodMs,
@@ -308,7 +308,7 @@ export async function getPatientStats(todayStr?: string) {
             const [hours, minutes] = (med.reminder_time || "08:00")
               .split(":")
               .map(Number);
-            const reminderDate = new Date();
+            const reminderDate = new Date(today);
             reminderDate.setHours(hours, minutes, 0, 0);
             const graceEnd = new Date(reminderDate.getTime() + gracePeriodMs);
             if (now.getTime() >= graceEnd.getTime()) missedThisMonth++;
