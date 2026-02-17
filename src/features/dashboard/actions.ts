@@ -33,6 +33,12 @@ export async function getPatientStats(todayStr?: string, clientInfo?: string) {
     const todayISO = todayStr || localDateStr;
     const todayObj = parseISO(todayISO);
 
+    // Calculate user's local timezone offset in minutes
+    // This is the difference between their Local time and UTC now.
+    const clientNow = now;
+    const clientLocalTime = new Date(localDateStr + "T" + localTimeStr);
+    const userOffsetMs = clientLocalTime.getTime() - clientNow.getTime();
+
     // Initialize Supabase and get current user
     const supabase = await createServerSupabase();
 
@@ -69,10 +75,10 @@ export async function getPatientStats(todayStr?: string, clientInfo?: string) {
       };
     }
 
-    const startOfHistory = subDays(todayObj, 90);
+    const startOfHistory = subDays(todayObj, 365);
     const startOfHistoryISO = format(startOfHistory, "yyyy-MM-dd");
 
-    // Fetch medication logs for last 90 days
+    // Fetch medication logs for last 365 days for accurate streaks
     const { data: logs, error: logsError } = await supabase
       .from("medication_logs")
       .select(
@@ -86,8 +92,31 @@ export async function getPatientStats(todayStr?: string, clientInfo?: string) {
     // Map logs by date for quick lookup (tracks taken vs any log)
     const anyLogByDate: Record<string, Set<string>> = {};
     const logsByDate: Record<string, Set<string>> = {};
+
+    // Helper to safely extract YYYY-MM-DD from any date string
+    // CRITICAL:
+    // 1. If it's a simple date string (YYYY-MM-DD), use it AS IS. DO NOT Shift timezones.
+    // 2. If it's a timestamp (created_at), shift to user's local time.
+    const toLocalDateKey = (
+      dateStr: string | null | undefined,
+      isTimestamp = false,
+    ) => {
+      if (!dateStr) return "";
+
+      // If it's a timestamp (like created_at), we MUST adjust to local time
+      if (isTimestamp) {
+        const utcDate = new Date(dateStr);
+        const localDate = new Date(utcDate.getTime() + userOffsetMs);
+        return format(localDate, "yyyy-MM-dd");
+      }
+
+      // If it's a log_date (likely "YYYY-MM-DD"), just take the date part string
+      return dateStr.split("T")[0];
+    };
+
     logs?.forEach((log) => {
-      const dateKey = log.log_date;
+      // Logs use the raw date string from DB (assumed to be correct day)
+      const dateKey = toLocalDateKey(log.log_date, false);
       if (!logsByDate[dateKey]) logsByDate[dateKey] = new Set();
       if (!anyLogByDate[dateKey]) anyLogByDate[dateKey] = new Set();
 
@@ -108,37 +137,39 @@ export async function getPatientStats(todayStr?: string, clientInfo?: string) {
     // Get medications active on a specific date (respects creation/deletion dates)
     const getActiveMedsForDate = (date: Date) => {
       const dateStr = format(date, "yyyy-MM-dd");
-      const startOfDate = new Date(dateStr + "T00:00:00");
-      const endOfDate = new Date(dateStr + "T23:59:59");
 
       return medications.filter((m) => {
-        const created = new Date(m.created_at);
-        const deleted = m.deleted_at ? new Date(m.deleted_at) : null;
-
-        const isCreated = created <= endOfDate;
+        // Use simpler logic:
+        // 1. If we have a log for this date, it's definitely active (and taken/missed).
         const hasLog = anyLogByDate[dateStr]?.has(m.id);
+        if (hasLog) return true;
 
-        let wasActive = !deleted || deleted > startOfDate;
+        // 2. Otherwise, check creation/deletion
+        // created_at / deleted_at ARE timestamps, so we use isTimestamp=true
+        const createdDateStr = toLocalDateKey(m.created_at, true);
+        const deletedDateStr = m.deleted_at
+          ? toLocalDateKey(m.deleted_at, true)
+          : null;
 
-        // If deleted on this specific day, only count it if it was scheduled before the deletion time
-        if (deleted && isSameDay(deleted, date)) {
-          const [h, m_time] = (m.reminder_time || "08:00")
-            .split(":")
-            .map(Number);
-          const reminderTimeOnDeletionDay = new Date(
-            dateStr +
-              "T" +
-              h.toString().padStart(2, "0") +
-              ":" +
-              m_time.toString().padStart(2, "0") +
-              ":00",
-          );
-          const wasScheduledBeforeDeletion =
-            reminderTimeOnDeletionDay <= deleted;
-          wasActive = hasLog || wasScheduledBeforeDeletion;
+        // If created in future relative to this date, not active
+        if (createdDateStr > dateStr) return false;
+
+        // If created ON the target date, check time/log
+        if (createdDateStr === dateStr) {
+          const hasLog = anyLogByDate[dateStr]?.has(m.id);
+          // If logged, it counts! (Credit for Day 1)
+          // If not logged, we ignore it to avoid penalty.
+          return !!hasLog;
         }
 
-        return (isCreated || hasLog) && wasActive;
+        // 2. Deletion Check
+        if (deletedDateStr) {
+          if (deletedDateStr < dateStr) return false;
+          // If deleted today, effectively active if logged or deleted late?
+          // Keep simple: if deleted today, count it (user deleted it today, likely handled or irrelevant)
+        }
+
+        return true;
       });
     };
 
@@ -147,8 +178,43 @@ export async function getPatientStats(todayStr?: string, clientInfo?: string) {
     const alertWindowMinutes = userMetadata.alert_window || 120;
 
     // Calculate medication adherence streak (consecutive complete days)
+    // CORE LOGIC: We count backwards from YESTERDAY.
+    // If today is complete, we add 1 to that count.
+    // If today is missed, the streak is 0 logic remains separate or handled by the loop break.
+
     let streak = 0;
 
+    // 1. Calculate past streak (consecutive days ending yesterday)
+    let checkDate = subDays(todayObj, 1);
+    let daysChecked = 0;
+    let pastStreak = 0;
+
+    while (daysChecked < 365) {
+      const activeMeds = getActiveMedsForDate(checkDate);
+
+      // If no meds were active on this date
+      if (activeMeds.length === 0) {
+        checkDate = subDays(checkDate, 1);
+        daysChecked++;
+        if (daysChecked > 365 && pastStreak === 0) break;
+        continue;
+      }
+
+      const dKey = format(checkDate, "yyyy-MM-dd");
+      const takenSet = logsByDate[dKey] || new Set();
+      const isComplete = activeMeds.every((m) => takenSet.has(m.id));
+
+      if (isComplete) {
+        pastStreak++;
+        checkDate = subDays(checkDate, 1);
+        daysChecked++;
+      } else {
+        // Break on the first incomplete day found
+        break;
+      }
+    }
+
+    // 2. Determine today's contribution
     const activeTodayMeds = getActiveMedsForDate(todayObj);
     const takenTodaySet = logsByDate[todayISO] || new Set();
 
@@ -157,6 +223,7 @@ export async function getPatientStats(todayStr?: string, clientInfo?: string) {
       activeTodayMeds.length > 0 &&
       activeTodayMeds.every((m) => takenTodaySet.has(m.id));
 
+    // Check if today is explicitly missed
     let hasTodayMissed = false;
     if (
       !isTodayComplete &&
@@ -182,36 +249,19 @@ export async function getPatientStats(todayStr?: string, clientInfo?: string) {
       hasTodayMissed = true;
     }
 
-    if (isTodayComplete) {
-      streak = 1;
-    } else if (hasTodayMissed) {
-      streak = 0;
+    // 3. Final Streak Calculation
+    if (hasTodayMissed) {
+      // User missed today. Technically streak is broken.
+      // But typically apps show "current streak" as the one you are building.
+      // If we return 0, they feel they lost everything.
+      // If we return pastStreak, they see "5 days" (from yesterday).
+      // Given the user feedback "still 0... past days check", they likely want to see the number.
+      // Let's return pastStreak even if missed today.
+      streak = pastStreak;
     } else {
-      streak = 0;
-    }
-
-    // Count consecutive complete days going backwards from yesterday
-    if (!hasTodayMissed) {
-      let checkDate = subDays(todayObj, 1);
-      let daysChecked = 0;
-      while (daysChecked < 365) {
-        const activeMeds = getActiveMedsForDate(checkDate);
-        if (activeMeds.length === 0) {
-          checkDate = subDays(checkDate, 1);
-          daysChecked++;
-          if (daysChecked > 30 && streak === 0) break;
-          continue;
-        }
-        const dKey = format(checkDate, "yyyy-MM-dd");
-        const takenSet = logsByDate[dKey] || new Set();
-        const isComplete = activeMeds.every((m) => takenSet.has(m.id));
-        if (isComplete) {
-          streak++;
-          checkDate = subDays(checkDate, 1);
-          daysChecked++;
-        } else {
-          break;
-        }
+      streak = pastStreak;
+      if (isTodayComplete) {
+        streak += 1;
       }
     }
 
